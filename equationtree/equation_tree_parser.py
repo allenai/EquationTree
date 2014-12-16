@@ -11,7 +11,6 @@ import cv2
 
 import networkx as nx
 
-
 class EquationTreeParser(object):
     cfg_string = '''
     expr -> form0 comp form0 | form0
@@ -57,8 +56,10 @@ class EquationTreeParser(object):
         atom = (symbol + paren).setParseAction(_push_func) | paren | const
         op3 = Literal('^')
         factor = atom + ZeroOrMore((op3 + atom).setParseAction(_push))
+        neg = Literal('-')
+        literal = (neg + factor).setParseAction(_push_func) | factor
         multop = Word('*/', max=1)
-        term = factor + ZeroOrMore((multop + factor).setParseAction(_push))
+        term = literal + ZeroOrMore((multop + literal).setParseAction(_push))
         addop = Word('+-', max=1)
         expr << term + ZeroOrMore((addop + term).setParseAction(_push))
         comp = Literal('>=') | Literal('<=') | Word('><=', max=1) 
@@ -76,7 +77,7 @@ class EquationTreeParser(object):
         return (self._stack, self._function_indices)
     
     @staticmethod
-    def _create_tree(stack, indices):
+    def _create_tree(stack, indices, explicit=False):
         '''
         Create networkx DiGraph using postfix notation stack.
         Non-destructive (i.e. copies stack)
@@ -101,13 +102,25 @@ class EquationTreeParser(object):
             
         return tree
         
-    def get_tree(self, string, display=False):
+    def parse_tree(self, string, explicit=False, display=False):
         '''
         Returns graph representation of the equation tree of string,
         as a networkx graph. 
+        If explicit is True, then '-x' -> '0-x'
         '''
         stack, indices = self.parse(string)
         tree = EquationTreeParser._create_tree(stack, indices)
+       
+        if explicit:
+            idx = -1
+            for node, data in tree.nodes(data=True):
+                if data['label'] == '-' and len(tree[node]) == 1:
+                    nbr = tree[node].keys()[0]
+                    tree.remove_edge(node, nbr)
+                    tree.add_node(idx, label='0')
+                    tree.add_edge(node, idx, label='left')
+                    tree.add_edge(node, nbr, label='right')
+                    idx -= 1
         
         if display:
             _, image_path = tempfile.mkstemp()
@@ -119,11 +132,11 @@ class EquationTreeParser(object):
             
         return tree
     
-    def get_formula(self, string):
+    def parse_formula(self, string, explicit=False):
         '''
-        returns prefix notation formula
+        returns prefix notation formula by default
         '''
-        tree = self.get_tree(string)
+        tree = self.parse_tree(string,explicit=explicit)
         
         def recurse(idx):
             label = tree.node[idx]['label']
@@ -139,12 +152,12 @@ class EquationTreeParser(object):
                 
         return recurse(1)
                 
+etp = EquationTreeParser()
         
         
 if __name__ == "__main__":
-    etp = EquationTreeParser()
-    string = "sqrt(5)/3"
-    tree = etp.get_tree(string, display=True)
-    formula = etp.get_formula(string)
+    string = "-x=5+z"
+    tree = etp.parse_tree(string,explicit=True,display=True)
+    formula = etp.parse_formula(string,explicit=True)
     print(formula)
     
